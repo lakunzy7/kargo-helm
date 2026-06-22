@@ -54,4 +54,5 @@ spec:
   - uses: argocd-update
     config:
       apps:
-      - name: kargo-helm-${{ ctx.stage }}
+      - name: kargo-helm-${{ ctx.stage }}-cluster1
+      - name: kargo-helm-${{ ctx.stage }}-cluster2
