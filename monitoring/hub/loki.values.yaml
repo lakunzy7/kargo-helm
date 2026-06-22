@@ -1,0 +1,60 @@
+# Hub: Loki 7.0.0 in SingleBinary mode, filesystem storage, 48h retention.
+# SimpleScalable/Distributed require object storage; SingleBinary works on local PVC.
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+  limits_config:
+    retention_period: 48h
+    reject_old_samples: false
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    size: 5Gi
+
+# turn off everything that belongs to the scalable/distributed topologies
+backend: { replicas: 0 }
+read: { replicas: 0 }
+write: { replicas: 0 }
+ingester: { replicas: 0 }
+querier: { replicas: 0 }
+queryFrontend: { replicas: 0 }
+queryScheduler: { replicas: 0 }
+distributor: { replicas: 0 }
+compactor: { replicas: 0 }
+indexGateway: { replicas: 0 }
+bloomPlanner: { replicas: 0 }
+bloomBuilder: { replicas: 0 }
+bloomGateway: { replicas: 0 }
+
+# not needed at lab scale / require object storage
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+gateway:
+  enabled: false
+minio:
+  enabled: false
+lokiCanary:
+  enabled: false
+test:
+  enabled: false

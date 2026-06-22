@@ -1,0 +1,18 @@
+# Hub: Tempo 1.24.4 single-binary, local PVC, 48h retention.
+# OTLP gRPC(4317)/HTTP(4318) receivers are enabled by chart defaults.
+# Default service is ClusterIP; a dedicated NodePort Service (tempo-otlp) is
+# applied separately so the spoke can push traces over the docker bridge.
+tempo:
+  retention: 48h
+  reportingEnabled: false
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+
+persistence:
+  enabled: true
+  size: 5Gi

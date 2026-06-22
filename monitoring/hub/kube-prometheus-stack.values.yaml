@@ -1,0 +1,128 @@
+# Hub: kube-prometheus-stack on cluster-2 (central pane)
+# Prometheus: 2d retention, remote-write receiver (spoke pushes here), NodePort 30090
+fullnameOverride: kube-prom
+
+# Prometheus externalLabels are applied only to OUTGOING data (remote_write/alerts),
+# never to locally-queried TSDB. So the hub's own scrapes would show a blank
+# cluster label while cluster-1 (remote-written) shows cluster=cluster-1.
+# Stamp cluster=cluster-2 onto local scrapes via per-ServiceMonitor relabelings.
+_clusterRelabel: &clusterRelabel
+  - targetLabel: cluster
+    replacement: cluster-2
+
+prometheusOperator:
+  serviceMonitor:
+    relabelings: *clusterRelabel
+
+prometheus:
+  serviceMonitor:
+    relabelings: *clusterRelabel
+  service:
+    type: NodePort
+    nodePort: 30090
+  prometheusSpec:
+    retention: 2d
+    enableRemoteWriteReceiver: true
+    externalLabels:
+      cluster: cluster-2
+    # discover ServiceMonitors/PodMonitors across all namespaces, not just chart-labeled
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+alertmanager:
+  serviceMonitor:
+    relabelings: *clusterRelabel
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
+
+grafana:
+  enabled: true
+  defaultDashboardsEnabled: true
+  serviceMonitor:
+    relabelings: *clusterRelabel
+  # datasources: Prometheus is auto-added by the chart; add Loki + Tempo (in-cluster)
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki.monitoring.svc:3100
+    - name: Tempo
+      type: tempo
+      access: proxy
+      url: http://tempo.monitoring.svc:3200
+
+# kind nodes: relax node-exporter mount that can fail on some kernels
+prometheus-node-exporter:
+  hostRootFsMount:
+    enabled: false
+  prometheus:
+    monitor:
+      relabelings: *clusterRelabel
+
+# Stamp cluster=cluster-2 on the major built-in ServiceMonitors so hub-local
+# series carry the same cluster label that remote-written cluster-1 series do.
+kube-state-metrics:
+  prometheus:
+    monitor:
+      relabelings: *clusterRelabel
+
+kubelet:
+  serviceMonitor:
+    cAdvisorRelabelings:
+      - targetLabel: cluster
+        replacement: cluster-2
+      - sourceLabels: [__metrics_path__]
+        targetLabel: metrics_path
+    probesRelabelings:
+      - targetLabel: cluster
+        replacement: cluster-2
+      - sourceLabels: [__metrics_path__]
+        targetLabel: metrics_path
+    resourceRelabelings:
+      - targetLabel: cluster
+        replacement: cluster-2
+      - sourceLabels: [__metrics_path__]
+        targetLabel: metrics_path
+    relabelings:
+      - targetLabel: cluster
+        replacement: cluster-2
+      - sourceLabels: [__metrics_path__]
+        targetLabel: metrics_path
+
+kubeApiServer:
+  serviceMonitor:
+    relabelings: *clusterRelabel
+
+coreDns:
+  serviceMonitor:
+    relabelings: *clusterRelabel
+
+kubeControllerManager:
+  serviceMonitor:
+    relabelings: *clusterRelabel
+
+kubeScheduler:
+  serviceMonitor:
+    relabelings: *clusterRelabel
+
+kubeProxy:
+  serviceMonitor:
+    relabelings: *clusterRelabel
+
+kubeEtcd:
+  serviceMonitor:
+    relabelings: *clusterRelabel

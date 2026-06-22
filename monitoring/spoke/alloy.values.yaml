@@ -1,0 +1,136 @@
+# Spoke Alloy on cluster-1: scrape metrics + tail logs + receive traces, then
+# ship everything to the hub (cluster-2) over the shared kind docker bridge.
+# Hub is reached by docker DNS name "cluster-2-control-plane" (fallback 172.18.0.3).
+#   metrics -> :30090/api/v1/write   logs -> :30100/loki/api/v1/push
+#   traces  -> :30317 (OTLP gRPC)
+controller:
+  type: daemonset
+
+alloy:
+  configMap:
+    create: true
+    content: |-
+      // ===================== METRICS =====================
+      // Scrape this cluster's nodes (kubelet/cAdvisor) and pods, remote_write to hub.
+      discovery.kubernetes "nodes" {
+        role = "node"
+      }
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      // kubelet cAdvisor metrics per node
+      discovery.relabel "cadvisor" {
+        targets = discovery.kubernetes.nodes.targets
+        rule {
+          replacement   = "/metrics/cadvisor"
+          target_label  = "__metrics_path__"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_node_name"]
+          target_label  = "node"
+        }
+      }
+
+      prometheus.scrape "cadvisor" {
+        targets         = discovery.relabel.cadvisor.output
+        scheme          = "https"
+        bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+        tls_config { insecure_skip_verify = true }
+        forward_to      = [prometheus.relabel.add_cluster.receiver]
+      }
+
+      // pods that opt in via prometheus.io/scrape annotation
+      discovery.relabel "annotated_pods" {
+        targets = discovery.kubernetes.pods.targets
+        rule {
+          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
+          regex         = "true"
+          action        = "keep"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+      }
+
+      prometheus.scrape "annotated_pods" {
+        targets    = discovery.relabel.annotated_pods.output
+        forward_to = [prometheus.relabel.add_cluster.receiver]
+      }
+
+      prometheus.relabel "add_cluster" {
+        rule {
+          target_label = "cluster"
+          replacement  = "cluster-1"
+        }
+        forward_to = [prometheus.remote_write.hub.receiver]
+      }
+
+      prometheus.remote_write "hub" {
+        endpoint {
+          url = "http://cluster-2-control-plane:30090/api/v1/write"
+        }
+        external_labels = { cluster = "cluster-1" }
+      }
+
+      // ===================== LOGS =====================
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pods.targets
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+      }
+
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pod_logs.output
+        forward_to = [loki.process.add_cluster.receiver]
+      }
+
+      loki.process "add_cluster" {
+        stage.static_labels {
+          values = { cluster = "cluster-1" }
+        }
+        forward_to = [loki.write.hub.receiver]
+      }
+
+      loki.write "hub" {
+        endpoint {
+          url = "http://cluster-2-control-plane:30100/loki/api/v1/push"
+        }
+      }
+
+      // ===================== TRACES =====================
+      otelcol.receiver.otlp "default" {
+        grpc { endpoint = "0.0.0.0:4317" }
+        http { endpoint = "0.0.0.0:4318" }
+        output {
+          traces = [otelcol.processor.batch.default.input]
+        }
+      }
+
+      otelcol.processor.batch "default" {
+        output {
+          traces = [otelcol.exporter.otlp.hub.input]
+        }
+      }
+
+      otelcol.exporter.otlp "hub" {
+        client {
+          endpoint = "cluster-2-control-plane:30317"
+          tls { insecure = true }
+        }
+      }
