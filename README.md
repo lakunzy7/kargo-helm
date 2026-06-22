@@ -9,6 +9,8 @@ This is a GitOps repository of a Kargo Helm example for getting started.
 * Image tag promotion
 * Direct Git commits to dev, staging
 * Feature flag promotion
+* Multi-cluster: each stage deploys to two clusters (`cluster1` = in-cluster,
+  `cluster2` = a second registered ArgoCD cluster)
 
 ## Requirements
 
@@ -68,28 +70,46 @@ This is a GitOps repository of a Kargo Helm example for getting started.
    kargo login --admin https://<kargo-url>
    ```
 
-8. Apply the Kargo manifests:
+8. Apply the ArgoCD manifests (AppProject + ApplicationSet). The
+   ApplicationSet reads the repo's `env/*` directories from GitHub `HEAD` and
+   generates one Application per stage, per cluster
+   (`kargo-helm-<stage>-cluster1` / `-cluster2`). The AppProject must exist
+   first, or the ApplicationSet fails generation with
+   `AppProject "kargo-helm" not found`.
+
+   ```shell
+   kubectl apply -f ./argocd
+   ```
+
+9. Apply the Kargo manifests:
 
    ```shell
    kargo apply -f ./kargo
    ```
 
-9. Add the Git repository credentials to Kargo. This can also be done in the UI
+10. Add the Git repository credentials to Kargo. This can also be done in the UI
    in the `kargo-helm` Project.
 
+   > Note: on recent Kargo CLI versions (v1.10+) the subcommand is
+   > `create repo-credentials` and flags use `=` syntax.
+
    ```shell
-   kargo create credentials github-creds \
-     --project kargo-helm \
+   kargo create repo-credentials github-creds \
+     --project=kargo-helm \
      --git \
-     --username <yourgithubusername> \
-     --repo-url https://github.com/<yourgithubusername>/kargo-helm.git
+     --username=<yourgithubusername> \
+     --repo-url=https://github.com/<yourgithubusername>/kargo-helm.git \
+     --password=<your-github-pat>
    ```
 
    As part of the promotion process, Kargo requires privileges to commit changes
    to your Git repository, as well as the ability to create pull requests. Ensure
-   that the given token has these privileges.
+   that the given token has these privileges (Contents: read & write, Pull
+   requests: write). A classic GitHub PAT begins with `ghp_` and is 40
+   characters; an invalid/truncated token causes the `git-push` step to fail
+   with `Invalid username or token`.
 
-10. Promote the image!
+11. Promote the image!
 
     You now have a Kargo Pipeline which promotes images from the guestbook
     container image repository, through a three-stage deploy pipeline. Visit
